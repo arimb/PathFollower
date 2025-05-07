@@ -7,10 +7,10 @@ from matplotlib.patches import FancyArrowPatch
 # Constants
 DT = 0.1
 MAX_SPEED = 2.0
-MAX_STEER = np.radians(30)
+MAX_STEER = np.radians(20)
 WHEELBASE = 1.0
 DEADZONE = 0.1
-MIN_FOLLOW_DIST = 2.0
+MIN_FOLLOW_DIST = 3.0
 NUM_FOLLOWERS = 4
 
 # Initialize Pygame for controller input
@@ -84,8 +84,10 @@ for c in colors:
     ax.add_patch(arrow)
     follower_arrows.append(arrow)
 
-# Spline and leader zone
-spline_line, = ax.plot([], [], 'g-', lw=1.5, label='Spline (F1)')
+# Splines for each follower
+spline_lines = [ax.plot([], [], 'g-', lw=1.5)[0] for _ in range(NUM_FOLLOWERS)]
+
+# Leader zone
 leader_zone = plt.Circle((0, 0), MIN_FOLLOW_DIST, color='gray', fill=False, linestyle='--', alpha=0.3)
 ax.add_patch(leader_zone)
 
@@ -101,11 +103,10 @@ def animate(i):
     # --- Leader Control ---
     v_leader, delta_leader = get_controller_input()
     leader_pose = update_pose(leader_pose, v_leader, delta_leader)
-
     update_arrow(leader_arrow, leader_pose)
     leader_zone.center = (leader_pose[0], leader_pose[1])
 
-    # --- Followers ---
+    # Each follower follows its leader
     lead = leader_pose
     for idx, follower_pose in enumerate(follower_poses):
         rel = relative_pose(follower_pose, lead)
@@ -114,26 +115,27 @@ def animate(i):
         if dist > MIN_FOLLOW_DIST:
             delta = pure_pursuit_control(rel)
             follower_pose = update_pose(follower_pose, MAX_SPEED * 0.9, delta)
+
         follower_poses[idx] = follower_pose
         update_arrow(follower_arrows[idx], follower_pose)
-        lead = follower_pose  # This follower becomes leader for the next
 
-    # --- Spline for first follower ---
-    rel = relative_pose(follower_poses[0], leader_pose)
-    rot = np.array([
-        [np.cos(follower_poses[0][2]), -np.sin(follower_poses[0][2])],
-        [np.sin(follower_poses[0][2]),  np.cos(follower_poses[0][2])]
-    ])
-    target_global = rot @ rel[:2] + follower_poses[0][:2]
-    theta_goal = follower_poses[0][2] + rel[2]
-    p0 = follower_poses[0][:2]
-    p3 = target_global
-    p1 = p0 + 1.5 * np.array([np.cos(follower_poses[0][2]), np.sin(follower_poses[0][2])])
-    p2 = p3 - 1.5 * np.array([np.cos(theta_goal), np.sin(theta_goal)])
-    curve = bezier_curve(p0, p1, p2, p3)
-    spline_line.set_data(curve[:, 0], curve[:, 1])
+        # Compute Bezier spline from this follower to its leader
+        rot = np.array([
+            [np.cos(follower_pose[2]), -np.sin(follower_pose[2])],
+            [np.sin(follower_pose[2]),  np.cos(follower_pose[2])]
+        ])
+        target_global = rot @ rel[:2] + follower_pose[:2]
+        theta_goal = follower_pose[2] + rel[2]
+        p0 = follower_pose[:2]
+        p3 = target_global
+        p1 = p0 + 1.5 * np.array([np.cos(follower_pose[2]), np.sin(follower_pose[2])])
+        p2 = p3 - 1.5 * np.array([np.cos(theta_goal), np.sin(theta_goal)])
+        curve = bezier_curve(p0, p1, p2, p3)
+        spline_lines[idx].set_data(curve[:, 0], curve[:, 1])
 
-    return [leader_arrow, *follower_arrows, spline_line]
+        lead = follower_pose  # This follower becomes the next leader
+
+    return [leader_arrow, *follower_arrows, *spline_lines]
 
 ani = FuncAnimation(fig, animate, interval=100)
 plt.show()
