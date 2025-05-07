@@ -1,6 +1,7 @@
 import pygame
 import numpy as np
 import matplotlib.pyplot as plt
+from Tools.scripts.generate_re_casefix import alpha
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import FancyArrowPatch
 
@@ -40,7 +41,7 @@ def relative_pose(follower_pose, leader_pose):
     rel_pos = rot @ np.array([dx, dy])
     return np.array([rel_pos[0], rel_pos[1], dtheta])
 
-def calc_lookahead(rel, lookahead_dist=2.0):
+def calc_lookahead(rel, lookahead_dist=MIN_FOLLOW_DIST):
     lx = rel[0] + lookahead_dist * np.cos(rel[2])
     ly = rel[1] + lookahead_dist * np.sin(rel[2])
     return np.array([lx, ly, rel[2]])
@@ -51,16 +52,6 @@ def pure_pursuit_control(target):
     alpha = np.arctan2(y, x)
     delta = np.arctan2(2 * WHEELBASE * np.sin(alpha), Ld)
     return clamp(delta, -MAX_STEER, MAX_STEER)
-
-def bezier_curve(p0, p1, p2, p3, num_points=50):
-    t = np.linspace(0, 1, num_points)[:, None]
-    curve = (
-        (1 - t)**3 * p0 +
-        3 * (1 - t)**2 * t * p1 +
-        3 * (1 - t) * t**2 * p2 +
-        t**3 * p3
-    )
-    return curve
 
 def update_arrow(arrow, pose, length=1.5):
     x, y, theta = pose
@@ -78,26 +69,24 @@ ax.set_aspect('equal')
 ax.set_xlim(-30, 30)
 ax.set_ylim(-30, 30)
 
-# Draw leader and follower arrows
-leader_arrow = FancyArrowPatch((0, 0), (1, 0), color='red', mutation_scale=15, arrowstyle='->')
-ax.add_patch(leader_arrow)
-
-follower_arrows = []
-lookahead_markers = []
-colors = ['blue', 'green', 'purple', 'orange']
-for c in colors:
-    arrow = FancyArrowPatch((0, 0), (1, 0), color=c, mutation_scale=15, arrowstyle='->')
-    ax.add_patch(arrow)
-    follower_arrows.append(arrow)
-    marker, = ax.plot([], [], marker='x', color=c, markersize=6)
-    lookahead_markers.append(marker)
-
-# Splines for each follower
-spline_lines = [ax.plot([], [], 'g-', lw=1.5)[0] for _ in range(NUM_FOLLOWERS)]
-
 # Leader zone
 leader_zone = plt.Circle((0, 0), MIN_FOLLOW_DIST, color='gray', fill=False, linestyle='--', alpha=0.3)
 ax.add_patch(leader_zone)
+
+# Draw leader and follower arrows
+
+follower_arrows = []
+lookahead_markers = []
+arc_lines = []
+colors = ['blue', 'green', 'purple', 'orange']
+for c in colors:
+    arc_lines.append(ax.plot([], [], linestyle=':', color=c, lw=1.5, alpha=0.5)[0])
+    lookahead_markers.append(ax.plot([], [], marker='x', color=c, markersize=6, alpha=0.5)[0])
+    follower_arrows.append(FancyArrowPatch((0, 0), (1, 0), color=c, mutation_scale=15, arrowstyle='->'))
+    ax.add_patch(follower_arrows[-1])
+
+leader_arrow = FancyArrowPatch((0, 0), (1, 0), color='red', mutation_scale=15, arrowstyle='->')
+ax.add_patch(leader_arrow)
 
 def get_controller_input():
     pygame.event.pump()
@@ -126,6 +115,7 @@ def animate(i):
             follower_pose = update_pose(follower_pose, MAX_SPEED * 0.9, delta)
         else:
             lookahead = rel
+            delta = 0
 
         rot = np.array([
             [np.cos(follower_pose[2]), -np.sin(follower_pose[2])],
@@ -137,19 +127,39 @@ def animate(i):
         lookahead_global = follower_pose[:2] + rot @ lookahead[:2]
         lookahead_markers[idx].set_data([lookahead_global[0]], [lookahead_global[1]])
 
-        # Compute Bezier spline from this follower to its leader
-        target_global = rot @ rel[:2] + follower_pose[:2]
-        theta_goal = follower_pose[2] + rel[2]
-        p0 = follower_pose[:2]
-        p3 = target_global
-        p1 = p0 + 1.5 * np.array([np.cos(follower_pose[2]), np.sin(follower_pose[2])])
-        p2 = p3 - 1.5 * np.array([np.cos(theta_goal), np.sin(theta_goal)])
-        curve = bezier_curve(p0, p1, p2, p3)
-        spline_lines[idx].set_data(curve[:, 0], curve[:, 1])
+        # --- Draw pursuit arc ---
+        if dist > MIN_FOLLOW_DIST and abs(delta) > 1e-3:
+            R = WHEELBASE / np.tan(delta)
+            theta = follower_pose[2]
+            x, y = follower_pose[0], follower_pose[1]
+
+            # Determine turning center
+            cx = x - R * np.sin(theta)
+            cy = y + R * np.cos(theta)
+
+            # Start and end angles relative to the turning center
+            theta_start = np.arctan2(y - cy, x - cx)
+            theta_end = np.arctan2(lookahead_global[1] - cy, lookahead_global[0] - cx)
+
+            # Ensure correct arc direction
+            if delta > 0:  # Turning left (CCW)
+                if theta_end < theta_start:
+                    theta_end += 2 * np.pi
+            else:  # Turning right (CW)
+                if theta_end > theta_start:
+                    theta_end -= 2 * np.pi
+
+            arc_theta = np.linspace(theta_start, theta_end, 100)
+            arc_x = cx + abs(R) * np.cos(arc_theta)
+            arc_y = cy + abs(R) * np.sin(arc_theta)
+            arc_lines[idx].set_data(arc_x, arc_y)
+        else:
+            arc_lines[idx].set_data([], [])
 
         lead = follower_pose  # This follower becomes the next leader
 
-    return [leader_arrow, *follower_arrows, *spline_lines]
+    return [leader_arrow, *follower_arrows, *lookahead_markers, *arc_lines]
+
 
 ani = FuncAnimation(fig, animate, interval=100)
 plt.show()
