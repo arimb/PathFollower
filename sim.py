@@ -11,7 +11,7 @@ MAX_LEADER_SPEED = 2.0
 MAX_SPEED = 2 * MAX_LEADER_SPEED
 MAX_STEER = np.radians(20)
 WHEELBASE = 1.0
-DEADZONE = 0.1
+JOYSTICK_DEADBAND = 0.1
 MIN_FOLLOW_DIST = 3.0
 NUM_FOLLOWERS = 4
 
@@ -70,10 +70,6 @@ ax.set_aspect('equal')
 ax.set_xlim(-30, 30)
 ax.set_ylim(-30, 30)
 
-# Leader zone
-leader_zone = plt.Circle((0, 0), MIN_FOLLOW_DIST, color='gray', fill=False, linestyle='--', alpha=0.3)
-ax.add_patch(leader_zone)
-
 # Draw leader and follower arrows
 
 follower_arrows = []
@@ -89,6 +85,11 @@ for c in colors:
 leader_arrow = FancyArrowPatch((0, 0), (1, 0), color='red', mutation_scale=15, arrowstyle='->')
 ax.add_patch(leader_arrow)
 
+leader_trail = []
+MAX_TRAIL_POINTS = 150
+leader_trail_line, = ax.plot([], [], 'k', lw=1.5, alpha=0.3)  # Black dotted line
+
+
 def get_controller_input():
     pygame.event.pump()
     forward = (joystick.get_axis(5) + 1) / 2
@@ -101,8 +102,15 @@ def animate(i):
     # --- Leader Control ---
     v_leader, delta_leader = get_controller_input()
     leader_pose = update_pose(leader_pose, v_leader, delta_leader)
+    leader_trail.append(leader_pose[:2])
+    if len(leader_trail) > MAX_TRAIL_POINTS:
+        leader_trail.pop(0)
+
     update_arrow(leader_arrow, leader_pose)
-    leader_zone.center = (leader_pose[0], leader_pose[1])
+    if leader_trail:
+        trail_array = np.array(leader_trail)
+        leader_trail_line.set_data(trail_array[:, 0], trail_array[:, 1])
+
 
     # Each follower follows its leader
     lead = leader_pose
@@ -160,7 +168,8 @@ def animate(i):
 
         lead = follower_pose  # This follower becomes the next leader
 
-    return [leader_arrow, *follower_arrows, *lookahead_markers, *arc_lines]
+    return [leader_arrow, *follower_arrows, *lookahead_markers, *arc_lines, leader_trail_line]
+
 
 
 ani = FuncAnimation(fig, animate, interval=100)
