@@ -40,6 +40,11 @@ def relative_pose(follower_pose, leader_pose):
     rel_pos = rot @ np.array([dx, dy])
     return np.array([rel_pos[0], rel_pos[1], dtheta])
 
+def calc_lookahead(rel, lookahead_dist=2.0):
+    lx = rel[0] + lookahead_dist * np.cos(rel[2])
+    ly = rel[1] + lookahead_dist * np.sin(rel[2])
+    return np.array([lx, ly, rel[2]])
+
 def pure_pursuit_control(target):
     x, y, _ = target
     Ld = np.hypot(x, y)
@@ -78,11 +83,14 @@ leader_arrow = FancyArrowPatch((0, 0), (1, 0), color='red', mutation_scale=15, a
 ax.add_patch(leader_arrow)
 
 follower_arrows = []
+lookahead_markers = []
 colors = ['blue', 'green', 'purple', 'orange']
 for c in colors:
     arrow = FancyArrowPatch((0, 0), (1, 0), color=c, mutation_scale=15, arrowstyle='->')
     ax.add_patch(arrow)
     follower_arrows.append(arrow)
+    marker, = ax.plot([], [], marker='x', color=c, markersize=6)
+    lookahead_markers.append(marker)
 
 # Splines for each follower
 spline_lines = [ax.plot([], [], 'g-', lw=1.5)[0] for _ in range(NUM_FOLLOWERS)]
@@ -113,17 +121,23 @@ def animate(i):
         dist = np.hypot(rel[0], rel[1])
 
         if dist > MIN_FOLLOW_DIST:
-            delta = pure_pursuit_control(rel)
+            lookahead = calc_lookahead(rel)
+            delta = pure_pursuit_control(lookahead)
             follower_pose = update_pose(follower_pose, MAX_SPEED * 0.9, delta)
+        else:
+            lookahead = rel
 
-        follower_poses[idx] = follower_pose
-        update_arrow(follower_arrows[idx], follower_pose)
-
-        # Compute Bezier spline from this follower to its leader
         rot = np.array([
             [np.cos(follower_pose[2]), -np.sin(follower_pose[2])],
             [np.sin(follower_pose[2]),  np.cos(follower_pose[2])]
         ])
+
+        follower_poses[idx] = follower_pose
+        update_arrow(follower_arrows[idx], follower_pose)
+        lookahead_global = follower_pose[:2] + rot @ lookahead[:2]
+        lookahead_markers[idx].set_data([lookahead_global[0]], [lookahead_global[1]])
+
+        # Compute Bezier spline from this follower to its leader
         target_global = rot @ rel[:2] + follower_pose[:2]
         theta_goal = follower_pose[2] + rel[2]
         p0 = follower_pose[:2]
