@@ -7,7 +7,8 @@ from matplotlib.patches import FancyArrowPatch
 
 # Constants
 DT = 0.1
-MAX_SPEED = 2.0
+MAX_LEADER_SPEED = 2.0
+MAX_SPEED = 2 * MAX_LEADER_SPEED
 MAX_STEER = np.radians(20)
 WHEELBASE = 1.0
 DEADZONE = 0.1
@@ -92,7 +93,7 @@ def get_controller_input():
     pygame.event.pump()
     forward = (joystick.get_axis(5) + 1) / 2
     steer = -joystick.get_axis(0)
-    return forward * MAX_SPEED, steer * MAX_STEER
+    return forward * MAX_LEADER_SPEED, steer * MAX_STEER
 
 def animate(i):
     global leader_pose, follower_poses
@@ -112,7 +113,8 @@ def animate(i):
         if dist > MIN_FOLLOW_DIST:
             lookahead = calc_lookahead(rel)
             delta = pure_pursuit_control(lookahead)
-            follower_pose = update_pose(follower_pose, MAX_SPEED * 0.9, delta)
+            speed = clamp((dist - MIN_FOLLOW_DIST), 0.0, MAX_SPEED)
+            follower_pose = update_pose(follower_pose, speed, delta)
         else:
             lookahead = rel
             delta = 0
