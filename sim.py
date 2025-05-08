@@ -14,7 +14,7 @@ MAX_STEER = np.radians(20)
 WHEELBASE = 1.0
 JOYSTICK_DEADBAND = 0.1
 MIN_FOLLOW_DIST = 3.0
-NUM_FOLLOWERS = 4
+NUM_VEHICLES = 5
 
 # Initialize Pygame for controller input
 pygame.init()
@@ -166,15 +166,15 @@ def draw_pursuit_arc(follower_pose, delta, target_global, arc_line):
 # --- Initialization ---
 
 # Initial states
-leader_pose = np.array([0.0, 0.0, 0.0])
-follower_poses = [np.array([-(i+1) * MIN_FOLLOW_DIST, -1.0, 0.0]) for i in range(NUM_FOLLOWERS)]
+vehicle_poses = [np.array([-i * MIN_FOLLOW_DIST, -1.0, 0.0]) for i in range(NUM_VEHICLES)]
+vehicle_poses[0] = np.array([0.0, 0.0, 0.0])  # Leader at origin
 
-# Initialize target buffer
+# Initialize target buffers for followers (excluding leader)
 BUFFER_SIZE = 10
-target_buffers = [deque(maxlen=BUFFER_SIZE) for _ in range(NUM_FOLLOWERS)]
+target_buffers = [deque(maxlen=BUFFER_SIZE) for _ in range(NUM_VEHICLES - 1)]
 
 # Relative measurement history
-estimated_global_poses = [leader_pose.copy()] + [pose.copy() for pose in follower_poses]
+estimated_global_poses = [pose.copy() for pose in vehicle_poses]
 prev_rel_poses = None
 
 # Visualization setup
@@ -203,25 +203,27 @@ leader_trail_line, = ax.plot([], [], 'k', lw=1.5, alpha=0.3)  # Black dotted lin
 
 # --- Animation loop ---
 def animate(i):
-    global leader_pose, follower_poses, prev_rel_poses, estimated_global_poses
+    global vehicle_poses, prev_rel_poses, estimated_global_poses
 
     # --- Leader Control ---
     v_leader, delta_leader = get_controller_input()
-    leader_pose = update_pose(leader_pose, v_leader, delta_leader)
-    leader_trail.append(leader_pose[:2])
+    vehicle_poses[0] = update_pose(vehicle_poses[0], v_leader, delta_leader)
+
+    leader_trail.append(vehicle_poses[0][:2])
     if len(leader_trail) > MAX_TRAIL_POINTS:
         leader_trail.pop(0)
 
-    update_arrow(leader_arrow, leader_pose)
+    update_arrow(leader_arrow, vehicle_poses[0])
     if leader_trail:
         trail_array = np.array(leader_trail)
         leader_trail_line.set_data(trail_array[:, 0], trail_array[:, 1])
 
     # --- Follower Control ---
     # Each follower follows its leader
-    lead = leader_pose
     rel_poses = []
-    for idx, follower_pose in enumerate(follower_poses):
+    for idx in range(1, NUM_VEHICLES):
+        lead = vehicle_poses[idx - 1]
+        follower_pose = vehicle_poses[idx]
 
         # Follower logic
         rel = relative_pose(follower_pose, lead)
@@ -230,7 +232,7 @@ def animate(i):
 
         if dist > MIN_FOLLOW_DIST:
             lookahead = calc_lookahead(rel)
-            target_buffers[idx].append(lookahead)
+            target_buffers[idx - 1].append(lookahead)
 
             # Use delayed target if buffer is full
             if len(target_buffers[idx]) == BUFFER_SIZE:
@@ -251,17 +253,15 @@ def animate(i):
             [np.sin(follower_pose[2]),  np.cos(follower_pose[2])]
         ])
 
-        follower_poses[idx] = follower_pose
-        update_arrow(follower_arrows[idx], follower_pose)
+        vehicle_poses[idx] = follower_pose
+        update_arrow(follower_arrows[idx - 1], follower_pose)
         target_global = follower_pose[:2] + rot @ target[:2]
         lookahead_markers[idx].set_data([target_global[0]], [target_global[1]])
 
         if dist > MIN_FOLLOW_DIST:
-            draw_pursuit_arc(follower_pose, delta, target_global, arc_lines[idx])
+            draw_pursuit_arc(follower_pose, delta, target_global, arc_lines[idx - 1])
         else:
-            arc_lines[idx].set_data([], [])
-
-        lead = follower_pose  # This follower becomes the next leader
+            arc_lines[idx - 1].set_data([], [])
 
     # Estimate the global pose
     if prev_rel_poses is not None:
@@ -274,8 +274,8 @@ def animate(i):
             estimated_global_poses[j][2] += dtheta
 
             # Optional: Print error
-            error = np.linalg.norm(estimated_global_poses[j][:2] - follower_poses[j][:2])
-            print(f"Follower {j} error: {error:.2f}")
+            error = np.linalg.norm(estimated_global_poses[j][:2] - vehicle_poses[j][:2])
+            print(f"Vehicle {j} error: {error:.2f}")
 
     prev_rel_poses = rel_poses
 
