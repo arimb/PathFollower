@@ -22,6 +22,8 @@ pygame.joystick.init()
 joystick = pygame.joystick.Joystick(0)
 joystick.init()
 
+# --- Helper functions ---
+
 def clamp(val, min_val, max_val):
     return max(min(val, max_val), min_val)
 
@@ -55,18 +57,56 @@ def pure_pursuit_control(target):
     delta = np.arctan2(2 * WHEELBASE * np.sin(alpha), Ld)
     return clamp(delta, -MAX_STEER, MAX_STEER)
 
+# --- Drawing functions ---
+
 def update_arrow(arrow, pose, length=1.5):
     x, y, theta = pose
     dx = length * np.cos(theta)
     dy = length * np.sin(theta)
     arrow.set_positions((x, y), (x + dx, y + dy))
 
+def get_controller_input():
+    pygame.event.pump()
+    forward = (joystick.get_axis(5) + 1) / 2
+    steer = -joystick.get_axis(0)
+    return forward * MAX_LEADER_SPEED, steer * MAX_STEER
+
+def draw_pursuit_arc(follower_pose, delta, target_global, arc_line):
+    if abs(delta) < 1e-3:
+        arc_line.set_data([], [])
+        return
+
+    R = WHEELBASE / np.tan(delta)
+    theta = follower_pose[2]
+    x, y = follower_pose[0], follower_pose[1]
+
+    # Turning center
+    cx = x - R * np.sin(theta)
+    cy = y + R * np.cos(theta)
+
+    # Start and end angles
+    theta_start = np.arctan2(y - cy, x - cx)
+    theta_end = np.arctan2(target_global[1] - cy, target_global[0] - cx)
+
+    # Arc direction
+    if delta > 0 and theta_end < theta_start:
+        theta_end += 2 * np.pi
+    elif delta < 0 and theta_end > theta_start:
+        theta_end -= 2 * np.pi
+
+    arc_theta = np.linspace(theta_start, theta_end, 100)
+    arc_x = cx + abs(R) * np.cos(arc_theta)
+    arc_y = cy + abs(R) * np.sin(arc_theta)
+    arc_line.set_data(arc_x, arc_y)
+
+# --- Initialization ---
+
 # Initial states
 leader_pose = np.array([0.0, 0.0, 0.0])
 follower_poses = [np.array([-(i+1) * MIN_FOLLOW_DIST, -1.0, 0.0]) for i in range(NUM_FOLLOWERS)]
 
 # Initialize target buffer
-BUFFER_SIZE = 30
+BUFFER_SIZE = 10
 target_buffers = [deque(maxlen=BUFFER_SIZE) for _ in range(NUM_FOLLOWERS)]
 
 # Visualization setup
@@ -75,8 +115,7 @@ ax.set_aspect('equal')
 ax.set_xlim(-30, 30)
 ax.set_ylim(-30, 30)
 
-# Draw leader and follower arrows
-
+# Draw leader and follower arrows, lookahead markers, and pursuit arcs
 follower_arrows = []
 lookahead_markers = []
 arc_lines = []
@@ -94,13 +133,7 @@ leader_trail = []
 MAX_TRAIL_POINTS = 150
 leader_trail_line, = ax.plot([], [], 'k', lw=1.5, alpha=0.3)  # Black dotted line
 
-
-def get_controller_input():
-    pygame.event.pump()
-    forward = (joystick.get_axis(5) + 1) / 2
-    steer = -joystick.get_axis(0)
-    return forward * MAX_LEADER_SPEED, steer * MAX_STEER
-
+# --- Animation loop ---
 def animate(i):
     global leader_pose, follower_poses
 
@@ -120,6 +153,8 @@ def animate(i):
     # Each follower follows its leader
     lead = leader_pose
     for idx, follower_pose in enumerate(follower_poses):
+
+        # Follower logic
         rel = relative_pose(follower_pose, lead)
         dist = np.hypot(rel[0], rel[1])
 
@@ -140,6 +175,7 @@ def animate(i):
             target = rel
             delta = 0
 
+        # Update animation
         rot = np.array([
             [np.cos(follower_pose[2]), -np.sin(follower_pose[2])],
             [np.sin(follower_pose[2]),  np.cos(follower_pose[2])]
@@ -150,32 +186,8 @@ def animate(i):
         target_global = follower_pose[:2] + rot @ target[:2]
         lookahead_markers[idx].set_data([target_global[0]], [target_global[1]])
 
-        # --- Draw pursuit arc ---
-        if dist > MIN_FOLLOW_DIST and abs(delta) > 1e-3:
-            R = WHEELBASE / np.tan(delta)
-            theta = follower_pose[2]
-            x, y = follower_pose[0], follower_pose[1]
-
-            # Determine turning center
-            cx = x - R * np.sin(theta)
-            cy = y + R * np.cos(theta)
-
-            # Start and end angles relative to the turning center
-            theta_start = np.arctan2(y - cy, x - cx)
-            theta_end = np.arctan2(target_global[1] - cy, target_global[0] - cx)
-
-            # Ensure correct arc direction
-            if delta > 0:  # Turning left (CCW)
-                if theta_end < theta_start:
-                    theta_end += 2 * np.pi
-            else:  # Turning right (CW)
-                if theta_end > theta_start:
-                    theta_end -= 2 * np.pi
-
-            arc_theta = np.linspace(theta_start, theta_end, 100)
-            arc_x = cx + abs(R) * np.cos(arc_theta)
-            arc_y = cy + abs(R) * np.sin(arc_theta)
-            arc_lines[idx].set_data(arc_x, arc_y)
+        if dist > MIN_FOLLOW_DIST:
+            draw_pursuit_arc(follower_pose, delta, target_global, arc_lines[idx])
         else:
             arc_lines[idx].set_data([], [])
 
