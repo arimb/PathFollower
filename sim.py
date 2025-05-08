@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from Tools.scripts.generate_re_casefix import alpha
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import FancyArrowPatch
+from collections import deque
 
 # Constants
 DT = 0.1
@@ -64,6 +65,10 @@ def update_arrow(arrow, pose, length=1.5):
 leader_pose = np.array([0.0, 0.0, 0.0])
 follower_poses = [np.array([-(i+1) * MIN_FOLLOW_DIST, -1.0, 0.0]) for i in range(NUM_FOLLOWERS)]
 
+# Initialize target buffer
+BUFFER_SIZE = 30
+target_buffers = [deque(maxlen=BUFFER_SIZE) for _ in range(NUM_FOLLOWERS)]
+
 # Visualization setup
 fig, ax = plt.subplots()
 ax.set_aspect('equal')
@@ -120,11 +125,19 @@ def animate(i):
 
         if dist > MIN_FOLLOW_DIST:
             lookahead = calc_lookahead(rel)
-            delta = pure_pursuit_control(lookahead)
+            target_buffers[idx].append(lookahead)
+
+            # Use delayed target if buffer is full
+            if len(target_buffers[idx]) == BUFFER_SIZE:
+                target = target_buffers[idx][0]
+            else:
+                target = lookahead
+
+            delta = pure_pursuit_control(target)
             speed = clamp((dist - MIN_FOLLOW_DIST), 0.0, MAX_SPEED)
             follower_pose = update_pose(follower_pose, speed, delta)
         else:
-            lookahead = rel
+            target = rel
             delta = 0
 
         rot = np.array([
@@ -134,8 +147,8 @@ def animate(i):
 
         follower_poses[idx] = follower_pose
         update_arrow(follower_arrows[idx], follower_pose)
-        lookahead_global = follower_pose[:2] + rot @ lookahead[:2]
-        lookahead_markers[idx].set_data([lookahead_global[0]], [lookahead_global[1]])
+        target_global = follower_pose[:2] + rot @ target[:2]
+        lookahead_markers[idx].set_data([target_global[0]], [target_global[1]])
 
         # --- Draw pursuit arc ---
         if dist > MIN_FOLLOW_DIST and abs(delta) > 1e-3:
@@ -149,7 +162,7 @@ def animate(i):
 
             # Start and end angles relative to the turning center
             theta_start = np.arctan2(y - cy, x - cx)
-            theta_end = np.arctan2(lookahead_global[1] - cy, lookahead_global[0] - cx)
+            theta_end = np.arctan2(target_global[1] - cy, target_global[0] - cx)
 
             # Ensure correct arc direction
             if delta > 0:  # Turning left (CCW)
