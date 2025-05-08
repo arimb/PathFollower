@@ -184,18 +184,16 @@ ax.set_xlim(-30, 30)
 ax.set_ylim(-30, 30)
 
 # Draw leader and follower arrows, lookahead markers, and pursuit arcs
-follower_arrows = []
-lookahead_markers = []
+vehicle_arrows = []
+debug_markers = []
 arc_lines = []
-colors = ['blue', 'green', 'purple', 'orange']
-for c in colors:
-    arc_lines.append(ax.plot([], [], linestyle=':', color=c, lw=1.5, alpha=0.5)[0])
-    lookahead_markers.append(ax.plot([], [], marker='x', color=c, markersize=6, alpha=0.5)[0])
-    follower_arrows.append(FancyArrowPatch((0, 0), (1, 0), color=c, mutation_scale=15, arrowstyle='->'))
-    ax.add_patch(follower_arrows[-1])
-
-leader_arrow = FancyArrowPatch((0, 0), (1, 0), color='red', mutation_scale=15, arrowstyle='->')
-ax.add_patch(leader_arrow)
+colors = ['red', 'blue', 'green', 'purple', 'orange']
+for idx in range(NUM_VEHICLES):
+    if idx > 0:
+        arc_lines.append(ax.plot([], [], linestyle=':', color=colors[idx], lw=1.5, alpha=0.5)[0])
+    debug_markers.append(ax.plot([], [], marker='x', color=colors[idx], markersize=6, alpha=0.5)[0])
+    vehicle_arrows.append(FancyArrowPatch((0, 0), (1, 0), color=colors[idx], mutation_scale=15, arrowstyle='->'))
+    ax.add_patch(vehicle_arrows[-1])
 
 leader_trail = []
 MAX_TRAIL_POINTS = 150
@@ -213,7 +211,7 @@ def animate(i):
     if len(leader_trail) > MAX_TRAIL_POINTS:
         leader_trail.pop(0)
 
-    update_arrow(leader_arrow, vehicle_poses[0])
+    update_arrow(vehicle_arrows[0], vehicle_poses[0])
     if leader_trail:
         trail_array = np.array(leader_trail)
         leader_trail_line.set_data(trail_array[:, 0], trail_array[:, 1])
@@ -235,8 +233,8 @@ def animate(i):
             target_buffers[idx - 1].append(lookahead)
 
             # Use delayed target if buffer is full
-            if len(target_buffers[idx]) == BUFFER_SIZE:
-                target = target_buffers[idx][0]
+            if len(target_buffers[idx-1]) == BUFFER_SIZE:
+                target = target_buffers[idx-1][0]
             else:
                 target = lookahead
 
@@ -254,9 +252,9 @@ def animate(i):
         ])
 
         vehicle_poses[idx] = follower_pose
-        update_arrow(follower_arrows[idx - 1], follower_pose)
+        update_arrow(vehicle_arrows[idx], follower_pose)
         target_global = follower_pose[:2] + rot @ target[:2]
-        lookahead_markers[idx].set_data([target_global[0]], [target_global[1]])
+        debug_markers[idx - 1].set_data([estimated_global_poses[idx][0]], [estimated_global_poses[idx][1]])
 
         if dist > MIN_FOLLOW_DIST:
             draw_pursuit_arc(follower_pose, delta, target_global, arc_lines[idx - 1])
