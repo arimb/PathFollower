@@ -14,7 +14,7 @@ MAX_STEER = np.radians(20)
 WHEELBASE = 1.0
 JOYSTICK_DEADBAND = 0.1
 MIN_FOLLOW_DIST = 3.0
-NUM_VEHICLES = 5
+NUM_VEHICLES = 2
 
 # Initialize Pygame for controller input
 pygame.init()
@@ -57,68 +57,58 @@ def pure_pursuit_control(target):
     delta = np.arctan2(2 * WHEELBASE * np.sin(alpha), Ld)
     return clamp(delta, -MAX_STEER, MAX_STEER)
 
-def estimate_global_displacements(rel_disp_t0, rel_disp_t1):
+def estimate_global_displacements(rel_disp_t1, rel_disp_t2, headings):
     """
-    Estimate global displacements (x, y, theta) for N vehicles based on relative displacements
-    between each vehicle and the one ahead, at two time steps.
+    Estimate global linear displacements (positions) of N non-holonomic vehicles using relative measurements and headings.
 
     Parameters:
-        rel_disp_t0: list of (dx, dy, dtheta) from each follower to its leader at time t0
-        rel_disp_t1: same at time t1
+        rel_disp_t1: list of tuples (dx, dy, dtheta) for time t1
+        rel_disp_t2: list of tuples (dx, dy, dtheta) for time t2
+            - Each entry i is the relative pose of vehicle i with respect to i+1 in i+1's local frame
+        headings: list of global headings (in radians) of each vehicle at time t1
 
     Returns:
-        Nx3 array: estimated (dx, dy, dtheta) global displacement for each vehicle
-                   (relative, up to global transform)
+        positions: Nx2 NumPy array of global displacement vectors (dx, dy) for each vehicle
     """
-    N = len(rel_disp_t0) + 1
+    N = len(headings)
+    assert len(rel_disp_t1) == len(rel_disp_t2) == N - 1
 
-    J = np.array([[0, -1], [1, 0]])  # 90 deg rotation matrix
+    # Compute relative displacement change in each follower's local frame
+    delta_rel = []
+    for (dx1, dy1, _), (dx2, dy2, _) in zip(rel_disp_t1, rel_disp_t2):
+        delta_rel.append((dx2 - dx1, dy2 - dy1))
 
-    # Convert to relative positions at t0 and t1
-    z_t0 = [np.array([dx, dy]) for dx, dy, _ in rel_disp_t0]
-    z_t1 = [np.array([dx, dy]) for dx, dy, _ in rel_disp_t1]
-    delta_z = [z1 - z0 for z0, z1 in zip(z_t0, z_t1)]
-
-    delta_theta_rel = [theta1 - theta0 for (_, _, theta0), (_, _, theta1) in zip(rel_disp_t0, rel_disp_t1)]
-
-    # Variables: 3 per vehicle (dx, dy, dtheta)
-    num_vars = 3 * N
-    A = []
+    # Convert to global frame using follower headings
     b = []
+    for i, (dx_local, dy_local) in enumerate(delta_rel):
+        theta_follower = headings[i + 1]
+        R = np.array([
+            [np.cos(theta_follower), -np.sin(theta_follower)],
+            [np.sin(theta_follower), np.cos(theta_follower)]
+        ])
+        delta_global = R @ np.array([dx_local, dy_local])
+        b.append(delta_global)
 
-    for i in range(1, N):
-        z0 = z_t0[i - 1]
-        Jz = J @ z0
+    b = np.concatenate(b)  # shape (2*(N-1),)
 
-        # First row: x-component
-        row = np.zeros(num_vars)
-        row[3 * (i - 1) + 0] += 1  # dx_{i-1}
-        row[3 * i + 0] += -1       # dx_i
-        row[3 * i + 2] += Jz[0]    # dtheta_i (rotation of follower)
-        A.append(row)
-        b.append(delta_z[i - 1][0])
+    # Build H matrix
+    H = np.zeros((2 * (N - 1), N))
+    for i in range(N - 1):
+        h_i = np.array([np.cos(headings[i]), np.sin(headings[i])])
+        h_ip1 = np.array([np.cos(headings[i + 1]), np.sin(headings[i + 1])])
+        H[2 * i:2 * i + 2, i] = h_i
+        H[2 * i:2 * i + 2, i + 1] = -h_ip1
 
-        # Second row: y-component
-        row = np.zeros(num_vars)
-        row[3 * (i - 1) + 1] += 1  # dy_{i-1}
-        row[3 * i + 1] += -1       # dy_i
-        row[3 * i + 2] += Jz[1]    # dtheta_i
-        A.append(row)
-        b.append(delta_z[i - 1][1])
+    # Solve least squares: H v = b
+    v, _, _, _ = np.linalg.lstsq(H, b, rcond=None)
 
-        # Third row: theta (orientation change)
-        row = np.zeros(num_vars)
-        row[3 * (i - 1) + 2] += 1  # dtheta_{i-1}
-        row[3 * i + 2] += -1       # dtheta_i
-        A.append(row)
-        b.append(delta_theta_rel[i - 1])
+    # Compute global displacement vectors
+    positions = np.array([
+        v_i * np.array([np.cos(theta), np.sin(theta)])
+        for v_i, theta in zip(v, headings)
+    ])
 
-    A = np.array(A)
-    b = np.array(b)
-
-    # Solve least squares
-    x, *_ = np.linalg.lstsq(A, b, rcond=None)
-    return x.reshape((N, 3))
+    return positions
 
 
 # --- Drawing functions ---
@@ -263,21 +253,20 @@ def animate(i):
 
     # Estimate the global pose
     if prev_rel_poses is not None:
-        displacements = estimate_global_displacements(prev_rel_poses, rel_poses)
-        for j, (dx, dy, dtheta) in enumerate(displacements):
-            theta = estimated_global_poses[j][2]
+        displacements = estimate_global_displacements(prev_rel_poses, rel_poses, [pose[2] for pose in vehicle_poses])
+        print(displacements)
+        for j, (dx, dy) in enumerate(displacements):
+            theta = vehicle_poses[j][2]
             rot = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
             delta_global = rot @ np.array([dx, dy])
             estimated_global_poses[j][:2] += delta_global
-            estimated_global_poses[j][2] += dtheta
 
-            # Optional: Print error
-            error = np.linalg.norm(estimated_global_poses[j][:2] - vehicle_poses[j][:2])
-            print(f"Vehicle {j} error: {error:.2f}")
+            # error = np.linalg.norm(estimated_global_poses[j][:2] - vehicle_poses[j][:2])
+            # print(f"Vehicle {j} error: {error:.2f}")
 
     prev_rel_poses = rel_poses
 
-    return [leader_arrow, *follower_arrows, *lookahead_markers, *arc_lines, leader_trail_line]
+    return [*vehicle_arrows, *debug_markers, *arc_lines, leader_trail_line]
 
 
 
