@@ -27,6 +27,12 @@ joystick.init()
 def clamp(val, min_val, max_val):
     return max(min(val, max_val), min_val)
 
+def angle_wrap(a):
+    return (a + np.pi) % (2 * np.pi) - np.pi
+
+# --- Vehicle dynamics and control functions ---
+
+
 def update_pose(pose, v, delta, dt=DT):
     x, y, theta = pose
     x += v * np.cos(theta) * dt
@@ -56,6 +62,90 @@ def pure_pursuit_control(target):
     alpha = np.arctan2(y, x)
     delta = np.arctan2(2 * WHEELBASE * np.sin(alpha), Ld)
     return clamp(delta, -MAX_STEER, MAX_STEER)
+
+def stanley_control(rel_target, current_theta, k=1.0):
+    """
+    Stanley controller for lateral control.
+    
+    Parameters:
+        rel_target: np.array([x, y]) — target position in vehicle-relative coordinates.
+        current_theta: float — current global orientation of the vehicle.
+        k: float — control gain for cross-track error.
+
+    Returns:
+        delta: steering angle (radians)
+    """
+    # Cross-track error is the lateral displacement in vehicle frame
+    cross_track_error = rel_target[1]
+
+    # Heading error (in vehicle frame, assume target heading is along x-axis)
+    heading_error = np.arctan2(rel_target[1], rel_target[0])
+
+    # Avoid divide by zero
+    L = np.hypot(rel_target[0], rel_target[1])
+    if L < 1e-6:
+        return 0.0
+
+    # Stanley steering law
+    delta = heading_error + np.arctan2(k * cross_track_error, L)
+
+    # Clamp to max steering
+    return clamp(delta, -MAX_STEER, MAX_STEER)
+
+def pure_pursuit_path_control(relative_trajectory, current_pose, lookahead_distance, k_v=1.0, max_omega=np.pi/4):
+    """
+    Implements the Pure Pursuit algorithm to follow the leader's path.
+
+    Inputs:
+        relative_trajectory: list of (relative_x, relative_y, relative_theta) positions
+        current_pose: current position of the follower (x, y, theta)
+        lookahead_distance: distance ahead of the follower to look for a target point on the path
+        k_v: Linear velocity gain (default is 1.0)
+        max_omega: Maximum angular velocity (steering limit) (default is pi/4)
+
+    Outputs:
+        v: Linear velocity command
+        omega: Angular velocity command (steering input)
+    """
+    
+    # Find the lookahead point in the trajectory
+    target_idx = None
+    min_dist = float('inf')
+    
+    # Loop over the trajectory and find the point closest to the lookahead distance
+    for i, (target_x, target_y, _) in enumerate(relative_trajectory):
+        dist = np.linalg.norm([target_x - current_pose[0], target_y - current_pose[1]])
+        if dist > lookahead_distance and dist < min_dist:
+            min_dist = dist
+            target_idx = i
+    
+    # If no valid target is found (i.e., the follower has reached the end of the trajectory), return zero velocities
+    if target_idx is None:
+        return 0.0, 0.0
+    
+    # Get the target lookahead point
+    target_x, target_y, _ = relative_trajectory[target_idx]
+    
+    # Compute the lookahead angle
+    dx = target_x - current_pose[0]
+    dy = target_y - current_pose[1]
+    alpha = np.arctan2(dy, dx) - current_pose[2]
+    alpha = angle_wrap(alpha)  # Normalize the angle to [-pi, pi]
+    
+    # Calculate steering angle based on the lookahead geometry
+    L = np.linalg.norm([dx, dy])  # Distance to the lookahead point
+    if L == 0:
+        omega = 0.0
+    else:
+        omega = 2 * np.sin(alpha) / L  # Pure Pursuit steering angle formula
+
+    # Linear velocity (k_v scaling factor for speed)
+    v = k_v * min(L, lookahead_distance)  # Limit the velocity to the lookahead distance
+
+    # Limit omega to the max steering rate (for safety)
+    omega = np.clip(omega, -max_omega, max_omega)
+    
+    return v, omega
 
 def estimate_global_displacements(rel_disp_t1, rel_disp_t2, headings):
     """
