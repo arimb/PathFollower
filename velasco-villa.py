@@ -24,8 +24,12 @@ def sinc(x):
 # --- Pygame Joystick Setup ---
 pygame.init()
 pygame.joystick.init()
-joystick = pygame.joystick.Joystick(0)
-joystick.init()
+try:
+    joystick = pygame.joystick.Joystick(0)
+    joystick.init()
+except pygame.error:
+    print("No joystick found. Please connect a joystick and restart the program.")
+    exit()
 
 def get_controller_input():
     pygame.event.pump()
@@ -134,7 +138,10 @@ def animate(i):
     return [*vehicle_arrows, leader_trail_line]
 
 # --- Launch Animation ---
-ani = FuncAnimation(fig, animate, interval=DT*1000, blit=True)
-plt.show()
-
-pygame.quit()
+try:
+    ani = FuncAnimation(fig, animate, interval=DT*1000, blit=True, cache_frame_data=False)
+    plt.show()
+except KeyboardInterrupt:
+    print("Animation stopped by user.")
+finally:
+    pygame.quit()
