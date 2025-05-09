@@ -21,6 +21,9 @@ def sinc(x):
     else:
         return 1.0
 
+def clamp(val, min_val, max_val):
+    return max(min(val, max_val), min_val)
+
 # --- Pygame Joystick Setup ---
 pygame.init()
 pygame.joystick.init()
@@ -40,6 +43,8 @@ def get_controller_input():
 # --- Motion Model ---
 def update_pose(pose, v, omega, dt=DT):
     x, y, theta = pose
+    v = clamp(v, -MAX_SPEED, MAX_SPEED)
+    omega = clamp(omega, -MAX_STEER, MAX_STEER)
     return (
         x + v * np.cos(theta) * dt,
         y + v * np.sin(theta) * dt,
@@ -52,7 +57,6 @@ def control_inputs_equation_30(x_rel, y_rel, alpha, v_tau, omega_tau, k1=1.0, k2
     return v, omega
 
 # --- Drawing Functions ---
-
 def update_arrow(arrow, pose, length=1.5):
     x, y, theta = pose
     dx = length * np.cos(theta)
@@ -92,7 +96,7 @@ leader_trail_line, = ax.plot([], [], 'k', lw=1.5, alpha=0.3)  # Black dotted lin
 
 
 # --- Animation Function ---
-def animate(i):
+def animate(frame):
     global poses, vels
 
     t = len(poses)
