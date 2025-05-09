@@ -161,7 +161,7 @@ vehicle_poses[0] = np.array([0.0, 0.0, 0.0])  # Leader at origin
 
 # Initialize target buffers for followers (excluding leader)
 BUFFER_SIZE = 10
-target_buffers = [deque(maxlen=BUFFER_SIZE) for _ in range(NUM_VEHICLES - 1)]
+position_buffer = [deque(maxlen=BUFFER_SIZE) for _ in range(NUM_VEHICLES - 1)]
 
 # Relative measurement history
 estimated_global_poses = [pose.copy() for pose in vehicle_poses]
@@ -219,14 +219,14 @@ def animate(i):
         dist = np.hypot(rel[0], rel[1])
 
         if dist > MIN_FOLLOW_DIST:
-            lookahead = calc_lookahead(rel)
-            target_buffers[idx - 1].append(lookahead)
+            position_buffer[idx-1].append(rel[:2].copy())
 
             # Use delayed target if buffer is full
-            if len(target_buffers[idx-1]) == BUFFER_SIZE:
-                target = target_buffers[idx-1][0]
-            else:
-                target = lookahead
+            # if len(position_buffer[idx-1]) == BUFFER_SIZE:
+            buffered_pos = position_buffer[idx-1][0]
+            target = calc_lookahead(np.append(buffered_pos, rel[2]))
+            # else:
+            #     target = calc_lookahead(rel)
 
             delta = pure_pursuit_control(target)
             speed = clamp((dist - MIN_FOLLOW_DIST), 0.0, MAX_SPEED)
