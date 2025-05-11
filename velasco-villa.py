@@ -7,8 +7,6 @@ import pygame
 # --- Constants ---
 NUM_VEHICLES = 5
 DT = 0.1  # seconds
-DELAY_TIME = 2.0  # seconds
-DELAY_STEPS = int(DELAY_TIME / DT)
 MAX_SPEED = 2.0  # m/s
 MAX_STEER = np.radians(30)  # radians/s
 TRAIL_TIME = 10.0  # seconds
@@ -110,10 +108,8 @@ def animate(frame):
 
     # Followers
     for i in range(1, NUM_VEHICLES):
-        if t - DELAY_STEPS < 0:
-            continue
-        lead_pose = poses[t - DELAY_STEPS][i - 1]
-        lead_v, lead_omega = vels[t - DELAY_STEPS][i - 1]
+        lead_pose = new_poses[i - 1]
+        lead_v, lead_omega = new_vels[i - 1]
         follower = new_poses[i]
 
         dx = lead_pose[0] - follower[0]
