@@ -7,6 +7,7 @@ import pygame
 # --- Constants ---
 NUM_VEHICLES = 5
 DT = 0.1  # seconds
+DELAY_TIME = 0.5  # seconds
 MAX_SPEED = 2.0  # m/s
 MAX_STEER = np.radians(30)  # radians/s
 TRAIL_TIME = 10.0  # seconds
@@ -62,6 +63,43 @@ def measure_relative_pose(leader, follower):
     
     return x_rel, y_rel, alpha
 
+def relative_to_absolute_pose(origin, relative_pose):
+    x_rel, y_rel, alpha = relative_pose
+    x_abs = origin[0] + x_rel * np.cos(origin[2]) - y_rel * np.sin(origin[2])
+    y_abs = origin[1] + x_rel * np.sin(origin[2]) + y_rel * np.cos(origin[2])
+    theta_abs = origin[2] + alpha
+    return [x_abs, y_abs, theta_abs]
+
+def update_time_delayed_relative_pose(prev_pose, leader_delayed_vel, follower_vel, dt=DT):
+    """Update the time-delayed relative pose measurement.
+    This function simulates the time delay in the relative pose measurement
+    by using the previous pose and the velocities of the leader and follower.
+    
+    Args:
+        prev_pose (x_rel, y_rel, alpha): Previous pose of the time-delayed leader relative to the follower.
+        leader_delayed_vel (v, omega): Velocity of the leader vehicle at the delayed time.
+        follower_vel (v, omega): Velocity of the follower vehicle at the current time.
+        dt (float): Time step for the simulation.
+        
+    Returns:
+        np.ndarray: Updated pose of the follower vehicle.
+    """
+    x_rel, y_rel, alpha = prev_pose
+    v_leader, omega_leader = leader_delayed_vel
+    v_follower, omega_follower = follower_vel
+    
+    # Calculate the pose derivates according to equation 29
+    dx_rel = -v_follower + v_leader * np.cos(alpha) + omega_follower * y_rel
+    dy_rel = v_leader * np.sin(alpha) - omega_follower * x_rel
+    dalpha = omega_leader - omega_follower
+    
+    # Update the relative pose
+    x_rel += dx_rel * dt
+    y_rel += dy_rel * dt
+    alpha += dalpha * dt
+    return [x_rel, y_rel, alpha]
+    
+
 def control_inputs_equation_30(x_rel, y_rel, alpha, v_tau, omega_tau, k1=1.0, k2=2.0, k3=3.0):
     omega = k2 * alpha + k3 * y_rel * v_tau * sinc(alpha) + omega_tau
     v = v_tau * np.cos(alpha) + k1 * x_rel
@@ -88,6 +126,8 @@ def draw_leader_line(vehicle_poses):
 # --- Initialize State ---
 poses = [np.array([[-i * 2.0, 0.0, 0.0] for i in range(NUM_VEHICLES)])]
 vels = [np.zeros((NUM_VEHICLES, 2))]
+
+time_delayed_rel_poses = np.zeros((NUM_VEHICLES-1, 3))
 
 # --- Plot Setup ---
 fig, ax = plt.subplots()
@@ -132,6 +172,16 @@ def animate(frame):
 
         # Calculate relative pose (simulate measurements)
         x_rel, y_rel, alpha = measure_relative_pose(lead_pose, follower)
+        
+        # Update time-delayed relative pose
+        if frame > DELAY_TIME / DT:
+            lead_delayed_vel = vels[frame - int(DELAY_TIME / DT)][i - 1]
+            follower_vel = new_vels[i]
+            time_delayed_rel_poses[i-1] = update_time_delayed_relative_pose(time_delayed_rel_poses[i-1], lead_delayed_vel, follower_vel)
+            x_rel, y_rel, alpha = time_delayed_rel_poses[i-1]
+        
+        x_abs, y_abs, _ = relative_to_absolute_pose(follower, [x_rel, y_rel, alpha])
+        markers[i - 1].set_data([x_abs], [y_abs])
         
         # Calculate control inputs
         v_i, omega_i = control_inputs_equation_30(x_rel, y_rel, alpha, lead_v, lead_omega)
