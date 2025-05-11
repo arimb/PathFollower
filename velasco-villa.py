@@ -48,6 +48,19 @@ def update_pose(pose, v, omega, dt=DT):
         y + v * np.sin(theta) * dt,
         theta + omega * dt
     )
+    
+def measure_relative_pose(leader, follower):
+    dx = leader[0] - follower[0]
+    dy = leader[1] - follower[1]
+    dtheta = leader[2] - follower[2]
+
+    cos_phi = np.cos(-follower[2])
+    sin_phi = np.sin(-follower[2])
+    x_rel = cos_phi * dx - sin_phi * dy
+    y_rel = sin_phi * dx + cos_phi * dy
+    alpha = dtheta
+    
+    return x_rel, y_rel, alpha
 
 def control_inputs_equation_30(x_rel, y_rel, alpha, v_tau, omega_tau, k1=1.0, k2=2.0, k3=3.0):
     omega = k2 * alpha + k3 * y_rel * v_tau * sinc(alpha) + omega_tau
@@ -118,16 +131,7 @@ def animate(frame):
         follower = new_poses[i]
 
         # Calculate relative pose (simulate measurements)
-        dx = lead_pose[0] - follower[0]
-        dy = lead_pose[1] - follower[1]
-        dtheta = lead_pose[2] - follower[2]
-
-        cos_phi = np.cos(-follower[2])
-        sin_phi = np.sin(-follower[2])
-        x_rel = cos_phi * dx - sin_phi * dy
-        y_rel = sin_phi * dx + cos_phi * dy
-        alpha = dtheta
-        relative = (x_rel, y_rel, alpha)
+        x_rel, y_rel, alpha = measure_relative_pose(lead_pose, follower)
         
         # Calculate control inputs
         v_i, omega_i = control_inputs_equation_30(x_rel, y_rel, alpha, lead_v, lead_omega)
