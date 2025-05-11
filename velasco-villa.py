@@ -88,6 +88,10 @@ colors = ['red', 'blue', 'green', 'purple', 'orange']
 for idx in range(NUM_VEHICLES):
     vehicle_arrows.append(FancyArrowPatch((0, 0), (1, 0), color=colors[idx], mutation_scale=15, arrowstyle='->'))
     ax.add_patch(vehicle_arrows[-1])
+    
+markers = []
+for idx in range(1, NUM_VEHICLES):
+    markers.append(ax.plot([], [], 'x', color=colors[idx], markersize=8)[0])
 
 leader_trail = []
 leader_trail_line, = ax.plot([], [], 'k', lw=1.5, alpha=0.3)  # Black dotted line
@@ -108,10 +112,12 @@ def animate(frame):
 
     # Followers
     for i in range(1, NUM_VEHICLES):
+        # Update leader and follower pose variables
         lead_pose = new_poses[i - 1]
         lead_v, lead_omega = new_vels[i - 1]
         follower = new_poses[i]
 
+        # Calculate relative pose (simulate measurements)
         dx = lead_pose[0] - follower[0]
         dy = lead_pose[1] - follower[1]
         dtheta = lead_pose[2] - follower[2]
@@ -121,7 +127,9 @@ def animate(frame):
         x_rel = cos_phi * dx - sin_phi * dy
         y_rel = sin_phi * dx + cos_phi * dy
         alpha = dtheta
-
+        relative = (x_rel, y_rel, alpha)
+        
+        # Calculate control inputs
         v_i, omega_i = control_inputs_equation_30(x_rel, y_rel, alpha, lead_v, lead_omega)
         new_poses[i] = update_pose(follower, v_i, omega_i)
         new_vels[i] = [v_i, omega_i]
@@ -135,7 +143,7 @@ def animate(frame):
         update_arrow(arrow, new_poses[idx])
     draw_leader_line(new_poses)
 
-    return [*vehicle_arrows, leader_trail_line]
+    return [*vehicle_arrows, leader_trail_line, *markers]
 
 # --- Launch Animation ---
 try:
