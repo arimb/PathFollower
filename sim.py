@@ -1,7 +1,6 @@
 import pygame
 import numpy as np
 import matplotlib.pyplot as plt
-from Tools.scripts.generate_re_casefix import alpha
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import FancyArrowPatch
 from collections import deque
