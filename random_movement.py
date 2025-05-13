@@ -45,13 +45,6 @@ def relative_pose(follower_pose, leader_pose):
     rel_pos = rot @ np.array([dx, dy])
     return np.array([rel_pos[0], rel_pos[1], dtheta])
 
-def odometry_update(last_pose, v, omega, dt=DT):
-    x, y, theta = last_pose
-    return (
-        x + v * np.cos(theta) * dt,
-        y + v * np.sin(theta) * dt,
-        theta + omega * dt
-    )
 
 # --- Drawing functions ---
 
@@ -102,7 +95,7 @@ def animate(i):
 
     # --- Global Pose Estimate ---
     rel_poses = [relative_pose(vehicle_poses[idx], vehicle_poses[idx-1]) for idx in range(1, NUM_VEHICLES)]
-    odometry_local = [odometry_update(pose_estimates[idx], v, omega) for idx in range(NUM_VEHICLES)]
+    odometry_local = [update_pose(pose_estimates[idx], v, omega) for idx in range(NUM_VEHICLES)]
     
     A = np.zeros((3*(2*NUM_VEHICLES-1), 3*NUM_VEHICLES))
     b = np.zeros((3*(2*NUM_VEHICLES-1), 1))
