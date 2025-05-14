@@ -12,7 +12,7 @@ MAX_SPEED = 2 * MAX_LEADER_SPEED  # m/s
 MAX_STEER = np.radians(20)  # delta
 WHEELBASE = 2.0  # meters
 JOYSTICK_DEADBAND = 0.1
-NUM_VEHICLES = 2
+NUM_VEHICLES = 5
 
 FOLLOW_DIST = 10.0  # meters
 FOLLOW_TIME = 10.0  # seconds
@@ -79,7 +79,11 @@ v_cmd = [0.0] * NUM_VEHICLES
 delta_cmd = [0.0] * NUM_VEHICLES
 
 # Queues for storing relative thetas
-theta_queues = [deque(maxlen=FOLLOW_TIME/DT).extend([0] * (FOLLOW_TIME / DT)) for _ in range(NUM_VEHICLES)]
+theta_queues = []
+for _ in range(NUM_VEHICLES-1):
+    theta_queues.append(deque(maxlen=int(FOLLOW_TIME/DT)+1))
+    theta_queues[-1].extend([0] * int(FOLLOW_TIME / DT))
+
 
 # Visualization setup
 fig, ax = plt.subplots()
@@ -102,7 +106,7 @@ leader_trail_line, = ax.plot([], [], 'k', lw=1.5, alpha=0.3)
 
 # --- Animation loop ---
 def animate(i):
-    global vehicle_poses
+    global vehicle_poses, theta_queues, v_cmd, delta_cmd
 
     # Leader Control
     v_cmd[0], delta_cmd[0] = get_controller_input()
@@ -114,28 +118,26 @@ def animate(i):
     
     for idx in range(1, NUM_VEHICLES):
         # Get the relative pose of the leader from the follower's perspective
-        leader_rel_pose = np.sum(rel_poses[:idx-1], axis=0)
+        leader_rel_pose = np.sum(np.array(rel_poses[:idx]), axis=0)
         
         # Proportional control on following distance for forward velocity
         dist_to_next = np.linalg.norm(rel_poses[idx-1][:2])
         v_cmd[idx] = clamp(v_cmd[0] + DIST_KP * (dist_to_next - FOLLOW_DIST), 0, MAX_SPEED)
         
         # Save queue of theta relative to leader and pop the oldest (i.e. theta from before FOLLOW_TIME)
-        theta_queues[idx].append(leader_rel_pose[2])
-        theta_delay = theta_queues[idx].popleft()
+        theta_queues[idx-1].append(leader_rel_pose[2])
+        theta_delay = theta_queues[idx-1].popleft()
         
         # Calculate turning speed as a combination of proportional control w.r.t. the relative delayed angle and a correction term if the current relative angle is too large
-        proportional = ANGLE_KP * (leader_rel_pose[2] - theta_delay)
-        leader_diff = leader_rel_pose[2] - 
-        correction = ANGLE_CORRECTION_FACTOR * (correction - ) if 
-        delta_cmd[idx] = clamp(leader_rel_pose[2] - theta_delay, -ANGLE_THRESHOLD, ANGLE_THRESHOLD)
+        proportional = ANGLE_KP * (rel_poses[idx-1][2] - theta_delay)
+        delta_cmd[idx] = clamp(proportional, -ANGLE_THRESHOLD, ANGLE_THRESHOLD)
 
     # --- Update animation ---
     
     for idx in range(NUM_VEHICLES):
         vehicle_poses[idx] = update_pose(vehicle_poses[idx], v_cmd[idx], delta_cmd[idx])
-        vehicle_arrows[idx].set_positions(vehicle_poses[idx][:2], vehicle_poses[idx][:2] + np.array([1, 0]) @ rot)
-        debug_markers[idx].set_data(vehicle_poses[idx][0], vehicle_poses[idx][1])
+        update_arrow(vehicle_arrows[idx], vehicle_poses[idx])
+        debug_markers[idx].set_data([vehicle_poses[idx][0]], [vehicle_poses[idx][1]])
     
     leader_trail.append(vehicle_poses[0][:2])
     if len(leader_trail) > MAX_TRAIL_POINTS:
