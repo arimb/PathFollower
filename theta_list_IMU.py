@@ -11,6 +11,7 @@ MAX_LEADER_SPEED = 10.0  # m/s
 MAX_SPEED = 2 * MAX_LEADER_SPEED  # m/s
 MAX_LEADER_STEER = np.radians(5)  # delta
 MAX_STEER = MAX_LEADER_STEER * 2  # delta
+ANGLE_NOISE = np.radians(0.8)  # degrees
 VEHICLE_WHEELBASE = 2.0  # meters
 VEHICLE_LENGTH = 4.9  # meters
 VEHICLE_WIDTH = 2.7   # meters
@@ -126,7 +127,7 @@ def animate(i):
 
     # Simulate measurements
     rel_poses = np.array([relative_pose(vehicle_poses[idx], vehicle_poses[idx-1]) for idx in range(1, NUM_VEHICLES)])
-    first_abs_heading = vehicle_poses[0][2]
+    first_abs_heading = vehicle_poses[0][2] + np.random.normal(0, ANGLE_NOISE)
 
     # --- Follower Control ---
     # From here on only use the simulated measurements
@@ -158,8 +159,8 @@ def animate(i):
     trail_array = np.array(leader_trail)
     leader_trail_line.set_data(trail_array[:, 0], trail_array[:, 1])
 
-    print(",".join([f"{np.linalg.norm(rel_pose[:2]):.2f}" for rel_pose in rel_poses]))
-    print(",".join([f"{VEHICLE_WHEELBASE/np.tan(delta):.2f}" for v, delta in zip(v_cmd, delta_cmd)]))
+    # print(",".join([f"{np.linalg.norm(rel_pose[:2]):.2f}" for rel_pose in rel_poses]))
+    # print(",".join([f"{VEHICLE_WHEELBASE/np.tan(delta):.2f}" for v, delta in zip(v_cmd, delta_cmd)]))
 
     return [*vehicle_patches, leader_trail_line]
 
