@@ -18,10 +18,9 @@ NUM_VEHICLES = 5
 
 FOLLOW_DIST = 10.0  # meters
 FOLLOW_TIME = FOLLOW_DIST / MAX_LEADER_SPEED  # seconds
-ANGLE_KP = 1.5  # (delta)/rad
-ANGLE_THRESHOLD = np.radians(25)  # delta
-ANGLE_CORRECTION_FACTOR = 10.0  # (delta)/rad
 DIST_KP = 5  # (m/s)/m
+ANGLE_KP = 1.5  # (delta)/rad
+STEERING_KP = 0.5  # (delta)/rad
 
 # Initialize Pygame for controller input
 pygame.init()
@@ -108,7 +107,7 @@ for idx in range(NUM_VEHICLES):
     vehicle_arrows.append(FancyArrowPatch((0, 0), (1, 0), color=colors[idx], mutation_scale=15, arrowstyle='->'))
     ax.add_patch(vehicle_arrows[-1])
 
-leader_trail = deque(maxlen = int(1.5 * MAX_LEADER_SPEED * NUM_VEHICLES / DT))
+leader_trail = deque(maxlen = int(1.5 * FOLLOW_DIST * NUM_VEHICLES / MAX_LEADER_SPEED / DT))
 leader_trail_line, = ax.plot([], [], 'k', lw=1.5, alpha=0.3)
 
 # --- Animation loop ---
@@ -126,12 +125,8 @@ def animate(i):
     # From here on only use the simulated measurements
     
     for idx in range(1, NUM_VEHICLES):
-        # Calculate the relative poses of the local leader and follower relative to the first vehicle
-        # Calculate the absolute heading of the local leader and follower
-        leader_rel_to_first = -np.sum(rel_poses[:idx-1], axis=0)
-        leader_abs_heading = first_abs_heading + leader_rel_to_first[2]
-        
-        follower_rel_to_first  = leader_rel_to_first - rel_poses[idx-1]
+        # Calculate the follower's relative pose w.r.t. the first vehicle, and its absolute heading
+        follower_rel_to_first  = -np.sum(rel_poses[:idx], axis=0)
         follower_abs_heading = first_abs_heading + follower_rel_to_first[2]
         
         # Save queue of the first vehicle's absolute heading and pop the oldest (i.e. theta from before FOLLOW_TIME*idx)
@@ -142,11 +137,10 @@ def animate(i):
         dist_to_next = np.linalg.norm(rel_poses[idx-1][:2])
         v_cmd[idx] = clamp(v_cmd[0] + DIST_KP * (dist_to_next - FOLLOW_DIST), 0, MAX_SPEED)
         
-        # Calculate turning speed as a combination of proportional control w.r.t. the delayed angle and a correction term if the current angle to first is too large
+        # Calculate turning speed as a combination of proportional control w.r.t. the delayed angle and a steering term to keep the follower aligned with the leader
         proportional = ANGLE_KP * (abs_theta_delay - follower_abs_heading)
-        correction = ANGLE_CORRECTION_FACTOR * (abs(rel_poses[idx-1][2]) - ANGLE_THRESHOLD) * np.sign(rel_poses[idx-1][2]) if abs(rel_poses[idx-1][2]) > ANGLE_THRESHOLD else 0
-        delta_cmd[idx] = clamp(proportional + correction, -MAX_STEER, MAX_STEER)
-        
+        steering = STEERING_KP * np.arctan2(rel_poses[idx-1][1], rel_poses[idx-1][0])
+        delta_cmd[idx] = clamp(proportional + steering, -MAX_STEER, MAX_STEER)
 
     # --- Update animation ---
     for idx in range(NUM_VEHICLES):
