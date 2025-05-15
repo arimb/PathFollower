@@ -100,10 +100,8 @@ ax.set_ylim(-GRAPH_LIMS, GRAPH_LIMS)
 
 # Draw leader and follower arrows, lookahead markers, and pursuit arcs
 vehicle_arrows = []
-debug_markers = []
 colors = ['red', 'blue', 'green', 'purple', 'orange']
 for idx in range(NUM_VEHICLES):
-    debug_markers.append(ax.plot([], [], marker='x', color=colors[idx], markersize=6, alpha=0.5)[0])
     vehicle_arrows.append(FancyArrowPatch((0, 0), (1, 0), color=colors[idx], mutation_scale=15, arrowstyle='->'))
     ax.add_patch(vehicle_arrows[-1])
 
@@ -146,13 +144,12 @@ def animate(i):
     for idx in range(NUM_VEHICLES):
         vehicle_poses[idx] = update_pose(vehicle_poses[idx], v_cmd[idx], delta_cmd[idx])
         update_arrow(vehicle_arrows[idx], vehicle_poses[idx])
-        # debug_markers[idx].set_data([vehicle_poses[idx][0]], [vehicle_poses[idx][1]])
     
     leader_trail.append(vehicle_poses[0][:2])
     trail_array = np.array(leader_trail)
     leader_trail_line.set_data(trail_array[:, 0], trail_array[:, 1])
 
-    return [*vehicle_arrows, *debug_markers, leader_trail_line]
+    return [*vehicle_arrows, leader_trail_line]
 
 
 
