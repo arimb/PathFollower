@@ -63,6 +63,41 @@ def relative_pose(follower_pose, leader_pose):
     rel_pos = rot @ np.array([dx, dy])
     return np.array([rel_pos[0], rel_pos[1], dtheta])
 
+def calculate_feedback(rel_poses, first_abs_heading, abs_theta_queues, first_v, first_delta):
+    """Calculate the feedback for the follower vehicles based on the leader's pose and relative poses.
+    Args:
+        rel_poses (np.array): The relative poses of the followers with respect to the leader.
+        first_abs_heading (float): The absolute heading of the leader.
+        abs_theta_queues (deque): The queue of absolute headings for each vehicle.
+        first_v (float): The commanded velocity of the leader.
+        first_delta (float): The commanded steering angle of the leader.
+    Returns:
+        tuple: The commanded velocities and steering angles for each vehicle."""
+    
+    num_vehicles = rel_poses.shape[0]+1
+    v_cmd = np.array([first_v] + [0.0] * (num_vehicles-1))
+    delta_cmd = np.array([first_delta] + [0.0] * (num_vehicles-1))
+
+    for idx in range(1, num_vehicles):
+        # Calculate the follower's relative pose w.r.t. the first vehicle, and its absolute heading
+        follower_rel_to_first  = -np.sum(rel_poses[:idx], axis=0)
+        follower_abs_heading = first_abs_heading + follower_rel_to_first[2]
+        
+        # Save queue of the first vehicle's absolute heading and pop the oldest (i.e. theta from before FOLLOW_TIME*idx)
+        abs_theta_queues[idx-1].append(first_abs_heading)
+        abs_theta_delay = abs_theta_queues[idx-1].popleft()
+        
+        # Proportional control on following distance for forward velocity
+        dist_to_next = np.linalg.norm(rel_poses[idx-1][:2])
+        v_cmd[idx] = clamp(first_v + DIST_KP * (dist_to_next - FOLLOW_DIST), 0, MAX_SPEED)
+        
+        # Calculate turning speed as a combination of proportional control w.r.t. the delayed angle and a steering term to keep the follower aligned with the leader
+        proportional = ANGLE_KP * (abs_theta_delay - follower_abs_heading)
+        steering = STEERING_KP * np.arctan2(rel_poses[idx-1][1], rel_poses[idx-1][0])
+        delta_cmd[idx] = clamp(proportional + steering, -MAX_STEER, MAX_STEER)
+        
+    return v_cmd, delta_cmd
+
 
 # --- Drawing functions ---
 
@@ -123,32 +158,14 @@ def animate(i):
     global vehicle_poses, abs_theta_queues, v_cmd, delta_cmd
 
     # Leader Control
-    v_cmd[0], delta_cmd[0] = get_controller_input()
+    first_v, first_delta = get_controller_input()
 
     # Simulate measurements
     rel_poses = np.array([relative_pose(vehicle_poses[idx], vehicle_poses[idx-1]) for idx in range(1, NUM_VEHICLES)])
     first_abs_heading = vehicle_poses[0][2] + np.random.normal(0, ANGLE_NOISE)
 
     # --- Follower Control ---
-    # From here on only use the simulated measurements
-    
-    for idx in range(1, NUM_VEHICLES):
-        # Calculate the follower's relative pose w.r.t. the first vehicle, and its absolute heading
-        follower_rel_to_first  = -np.sum(rel_poses[:idx], axis=0)
-        follower_abs_heading = first_abs_heading + follower_rel_to_first[2]
-        
-        # Save queue of the first vehicle's absolute heading and pop the oldest (i.e. theta from before FOLLOW_TIME*idx)
-        abs_theta_queues[idx-1].append(first_abs_heading)
-        abs_theta_delay = abs_theta_queues[idx-1].popleft()
-        
-        # Proportional control on following distance for forward velocity
-        dist_to_next = np.linalg.norm(rel_poses[idx-1][:2])
-        v_cmd[idx] = clamp(v_cmd[0] + DIST_KP * (dist_to_next - FOLLOW_DIST), 0, MAX_SPEED)
-        
-        # Calculate turning speed as a combination of proportional control w.r.t. the delayed angle and a steering term to keep the follower aligned with the leader
-        proportional = ANGLE_KP * (abs_theta_delay - follower_abs_heading)
-        steering = STEERING_KP * np.arctan2(rel_poses[idx-1][1], rel_poses[idx-1][0])
-        delta_cmd[idx] = clamp(proportional + steering, -MAX_STEER, MAX_STEER)
+    v_cmd, delta_cmd = calculate_feedback(rel_poses, first_abs_heading, abs_theta_queues, first_v, first_delta)
 
     # --- Update animation ---
     for idx in range(NUM_VEHICLES):
