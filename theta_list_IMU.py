@@ -2,7 +2,7 @@ import pygame
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from matplotlib.patches import FancyArrowPatch
+from matplotlib.patches import Rectangle
 from collections import deque
 
 # Constants
@@ -11,7 +11,9 @@ MAX_LEADER_SPEED = 10.0  # m/s
 MAX_SPEED = 2 * MAX_LEADER_SPEED  # m/s
 MAX_LEADER_STEER = np.radians(5)  # delta
 MAX_STEER = MAX_LEADER_STEER * 2  # delta
-WHEELBASE = 2.0  # meters
+VEHICLE_WHEELBASE = 2.0  # meters
+VEHICLE_LENGTH = 4.9  # meters
+VEHICLE_WIDTH = 2.7   # meters
 GRAPH_LIMS = 150
 JOYSTICK_DEADBAND = 0.1
 NUM_VEHICLES = 5
@@ -40,7 +42,7 @@ def update_pose(pose, v, delta, dt=DT):
     x, y, theta = pose
     x += v * np.cos(theta) * dt
     y += v * np.sin(theta) * dt
-    theta += v / WHEELBASE * np.tan(delta) * dt
+    theta += v / VEHICLE_WHEELBASE * np.tan(delta) * dt
     return np.array([x, y, theta])
 
 def relative_pose(follower_pose, leader_pose):
@@ -63,11 +65,14 @@ def relative_pose(follower_pose, leader_pose):
 
 # --- Drawing functions ---
 
-def update_arrow(arrow, pose, length=1.5):
+def update_rectangle(rect, pose):
     x, y, theta = pose
-    dx = length * np.cos(theta)
-    dy = length * np.sin(theta)
-    arrow.set_positions((x, y), (x + dx, y + dy))
+    # Rectangle expects lower left corner, so shift from center
+    rect.set_xy((
+        x - VEHICLE_LENGTH/2 * np.cos(theta) + VEHICLE_WIDTH/2 * np.sin(theta),
+        y - VEHICLE_LENGTH/2 * np.sin(theta) - VEHICLE_WIDTH/2 * np.cos(theta)
+    ))
+    rect.angle = np.degrees(theta)
 
 def get_controller_input():
     pygame.event.pump()
@@ -98,12 +103,16 @@ ax.set_aspect('equal')
 ax.set_xlim(-GRAPH_LIMS, GRAPH_LIMS)
 ax.set_ylim(-GRAPH_LIMS, GRAPH_LIMS)
 
-# Draw leader and follower arrows, lookahead markers, and pursuit arcs
-vehicle_arrows = []
+# Draw leader and follower rectangles instead of arrows
+vehicle_patches = []
 colors = ['red', 'blue', 'green', 'purple', 'orange']
 for idx in range(NUM_VEHICLES):
-    vehicle_arrows.append(FancyArrowPatch((0, 0), (1, 0), color=colors[idx], mutation_scale=15, arrowstyle='->'))
-    ax.add_patch(vehicle_arrows[-1])
+    vehicle_patches.append(Rectangle(
+        (-VEHICLE_LENGTH/2, -VEHICLE_WIDTH/2),
+        VEHICLE_LENGTH, VEHICLE_WIDTH,
+        color=colors[idx]
+    ))
+    ax.add_patch(vehicle_patches[-1])
 
 leader_trail = deque(maxlen = int(1.5 * FOLLOW_DIST * NUM_VEHICLES / MAX_LEADER_SPEED / DT))
 leader_trail_line, = ax.plot([], [], 'k', lw=1.5, alpha=0.3)
@@ -143,15 +152,16 @@ def animate(i):
     # --- Update animation ---
     for idx in range(NUM_VEHICLES):
         vehicle_poses[idx] = update_pose(vehicle_poses[idx], v_cmd[idx], delta_cmd[idx])
-        update_arrow(vehicle_arrows[idx], vehicle_poses[idx])
-    
+        update_rectangle(vehicle_patches[idx], vehicle_poses[idx])
+
     leader_trail.append(vehicle_poses[0][:2])
     trail_array = np.array(leader_trail)
     leader_trail_line.set_data(trail_array[:, 0], trail_array[:, 1])
 
-    return [*vehicle_arrows, leader_trail_line]
+    print(",".join([f"{np.linalg.norm(rel_pose[:2]):.2f}" for rel_pose in rel_poses]))
+    print(",".join([f"{VEHICLE_WHEELBASE/np.tan(delta):.2f}" for v, delta in zip(v_cmd, delta_cmd)]))
 
+    return [*vehicle_patches, leader_trail_line]
 
-
-ani = FuncAnimation(fig, animate, interval=100)
+ani = FuncAnimation(fig, animate, interval=DT*1000, cache_frame_data=False)
 plt.show()
